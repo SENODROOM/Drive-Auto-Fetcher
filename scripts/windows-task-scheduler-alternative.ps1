@@ -1,18 +1,19 @@
 # ============================================================
-#  install_task_scheduler.ps1
+#  windows-task-scheduler-alternative.ps1
 #  Alternative to PM2: run ONCE as Administrator to register
 #  Drive Auto-Fetcher as a Task Scheduler job that starts on login.
 #
-#  Most users should prefer scripts/setup.ps1 (PM2-based, restarts
-#  on crash, no admin required). Use this only if PM2/Node.js isn't
-#  an option on this machine.
+#  Most users should prefer installer.ps1 (PM2-based, restarts on
+#  crash, no admin required). Use this only if PM2/Node.js isn't an
+#  option on this machine.
 # ============================================================
 
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
-$pythonPath = (Get-Command python -ErrorAction Stop).Source
+$pinned     = Join-Path $RepoRoot ".runtime\python_path.txt"
+$pythonPath = if (Test-Path $pinned) { (Get-Content $pinned -Raw).Trim() } else { (Get-Command python -ErrorAction Stop).Source }
 $scriptPath = Join-Path $RepoRoot "src\drive_fetcher.py"
 $taskName   = "DriveAutoFetcher"
 
@@ -22,7 +23,7 @@ if (-not (Test-Path $scriptPath)) {
 }
 
 if (-not (Test-Path (Join-Path $RepoRoot "config.json"))) {
-    Write-Error "config.json not found. Run scripts\setup.bat (or 'python src\configure.py') first."
+    Write-Error "config.json not found. Run installer.ps1 (or 'python src\configure.py') first."
     exit 1
 }
 

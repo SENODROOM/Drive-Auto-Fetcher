@@ -13,3 +13,7 @@ pm2_out.log
 __pycache__/
 *.pyc
 .claude/
+
+# installer.ps1 / installer.sh self-contained fallback downloads
+# (standalone Python/Node.js runtime, venv, npm global prefix)
+.runtime/

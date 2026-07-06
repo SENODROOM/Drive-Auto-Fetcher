@@ -1,31 +1,31 @@
 # 📁 Drive Auto-Fetcher
 
 A background service that watches a Google Drive folder — or your entire Drive —
-downloads every file to a folder on your PC with the **exact same folder structure**,
-and **deletes each file from Drive** the moment it finishes downloading. New files
-are detected on a configurable interval. Already-downloaded files are never
-re-downloaded.
+downloads every file to a folder on your machine with the **exact same folder
+structure**, and **deletes each file from Drive** the moment it finishes
+downloading. New files are detected on a configurable interval. Already-downloaded
+files are never re-downloaded.
 
-Managed by **PM2** — a professional process manager that keeps the script running
-24/7 and automatically restarts it on crashes or Windows reboots.
+Managed by **PM2** — a process manager that keeps the script running 24/7 and
+automatically restarts it on crashes or reboots.
 
-One script (`scripts/setup.bat`) takes a completely bare Windows machine —
-no Python, no Node.js, nothing pre-installed — all the way to a fully running
-background service.
+Runs on **Windows, Linux, and macOS**. One installer script per OS takes a
+completely bare machine — no Python, no Node.js, nothing pre-installed — all
+the way to a fully running background service, downloading everything it needs
+itself.
 
 ---
 
 ## 📋 Table of Contents
 
 1. [How It Works](#how-it-works)
-2. [Project Layout](#project-layout)
+2. [Every Script, and What It's For](#every-script-and-what-its-for)
 3. [Quick Start](#quick-start)
 4. [Get Google API Credentials](#get-google-api-credentials)
 5. [Configuration](#configuration)
-6. [Using PM2](#using-pm2)
-7. [Alternative: Task Scheduler](#alternative-task-scheduler)
-8. [Troubleshooting](#troubleshooting)
-9. [Uninstalling](#uninstalling)
+6. [Managing the Service](#managing-the-service)
+7. [Troubleshooting](#troubleshooting)
+8. [Uninstalling](#uninstalling)
 
 ---
 
@@ -48,51 +48,79 @@ Every N seconds (configurable):
 "Scope" is whatever you chose during setup: a single Drive folder (with all its
 subfolders), or your entire Drive.
 
-**PM2** sits on top of this and:
-- Keeps the script running in the background (no window open)
-- Restarts it automatically if it crashes
-- Starts it automatically when Windows boots
-- Collects all logs in one place
-
-**Authentication** works via OAuth2 — you log in with your Google account
-once in a browser, and the script saves a `token.json` file. After that,
-the script authenticates silently forever (PM2 never needs a browser).
+**Authentication** works via OAuth2 — you log in with your Google account once
+in a browser, and the script saves a `token.json` file. After that, it
+authenticates silently forever.
 
 ---
 
-## Project Layout
+## Every Script, and What It's For
 
 ```
 drive-auto-fetcher/
 │
+├── installer.ps1                Windows one-click installer. Installs Python
+│                                 and Node.js if missing (winget, else a direct
+│                                 download into .runtime/), installs PM2 and the
+│                                 Python deps, runs the config wizard, logs in
+│                                 to Google, and starts the PM2 service.
+│
+├── installer.sh                 Linux/macOS equivalent of installer.ps1. Uses
+│                                 the system package manager (apt/dnf/yum/
+│                                 pacman/zypper/apk, or Homebrew on macOS) if
+│                                 available, otherwise downloads self-contained
+│                                 Python/Node.js builds into .runtime/ — no
+│                                 sudo, no system-wide changes either way.
+│
 ├── src/
-│   ├── drive_fetcher.py       All the runtime logic: authentication, folder
-│   │                          scanning, downloading, deleting, tracking
-│   └── configure.py           Interactive wizard that writes config.json
+│   ├── drive_fetcher.py         All runtime logic: auth, folder scanning,
+│   │                            downloading, deleting, tracking. This is what
+│   │                            actually runs, on every OS, once set up.
+│   └── configure.py             Interactive wizard — asks what to fetch and
+│                                 where to save it, writes config.json.
+│                                 Also runnable standalone: `python src/configure.py`
 │
 ├── scripts/
-│   ├── setup.bat / setup.ps1  Run ONCE — installs everything and starts the service
-│   ├── run_once.bat           Manually run a single check-and-download pass
-│   ├── run_watch.bat          Manually run continuously in a foreground window
-│   ├── pm2_start.bat          (Re)start the PM2-managed background service
-│   ├── pm2_stop.bat           Stop and remove the PM2-managed service
-│   └── install_task_scheduler.ps1
-│                              Alternative to PM2, using Windows Task Scheduler
+│   ├── start-service.ps1 / .sh  (Re)starts the PM2-managed background service
+│   │                            and registers it to auto-start on boot. Use
+│   │                            this after installer already ran once, e.g.
+│   │                            on a second machine or after a manual pm2 stop.
+│   ├── stop-service.ps1 / .sh   Stops and removes the service from PM2.
+│   ├── run-once.ps1 / .sh       Runs a single check-and-download pass in the
+│   │                            foreground, then exits. Useful for testing
+│   │                            config.json changes before trusting PM2 with them.
+│   ├── run-watch.ps1 / .sh      Runs continuously in the foreground (blocks the
+│   │                            terminal, Ctrl+C / close window to stop). Useful
+│   │                            for watching live output without PM2 involved.
+│   ├── windows-task-scheduler-alternative.ps1
+│   │                            Alternative to PM2 on Windows: registers a
+│   │                            Task Scheduler job instead. Use only if you'd
+│   │                            rather not install Node.js/PM2 at all.
+│   └── linux-systemd-alternative.sh
+│                                 Alternative to PM2 on Linux: registers a
+│                                 systemd --user service instead. Same idea —
+│                                 only needs Python, no Node.js/PM2.
 │
-├── ecosystem.config.js        PM2 configuration (process name, restart policy, logs)
-├── requirements.txt           Python dependencies (Google API client libraries)
-├── config.example.json        Template — copy/wizard-generate this into config.json
+├── ecosystem.config.js          PM2 process definition (name, restart policy,
+│                                 log files, and which Python interpreter to use).
+├── requirements.txt             Python dependencies (Google API client libraries).
+├── config.example.json          Template/reference only — the program never
+│                                 reads this file, only config.json.
 │
-├── config.json                 YOU create this (via the setup wizard) — your settings
-├── credentials.json            YOU create this — Google OAuth2 app credentials
-├── token.json                  AUTO-CREATED after first login — your Google session
-├── downloaded_files.json       AUTO-CREATED at runtime — dedup tracking
-├── drive_fetcher.log           AUTO-CREATED at runtime — full action log
-├── pm2_out.log / pm2_err.log   AUTO-CREATED by PM2 — stdout / stderr
+├── config.json                  YOU create this (via the wizard) — your settings.
+├── credentials.json              YOU create this — your Google OAuth2 app credentials.
+├── token.json                    AUTO-CREATED after first login — your Google session.
+├── downloaded_files.json         AUTO-CREATED at runtime — dedup tracking.
+├── drive_fetcher.log             AUTO-CREATED at runtime — full action log.
+├── pm2_out.log / pm2_err.log     AUTO-CREATED by PM2 — stdout / stderr.
+└── .runtime/                     AUTO-CREATED by the installers if Python/Node.js
+                                  had to be downloaded directly (no admin/sudo
+                                  needed) instead of found on the system.
 ```
 
-`config.json`, `credentials.json`, `token.json`, and all the auto-created files
-are gitignored — they're machine-specific and never committed.
+`config.json`, `credentials.json`, `token.json`, `.runtime/`, and all the
+auto-created files are gitignored — they're machine-specific and never
+committed.
 
 ---
 
@@ -103,37 +131,52 @@ You need three things, none of which you have to install by hand:
 | Tool | Purpose |
 |------|---------|
 | **Python 3.10+** | Runs the script |
-| **Node.js LTS** | Required by PM2 |
+| **Node.js** | Required by PM2 |
 | **PM2** | Process manager |
 
 ### Step 1 — Get Google API credentials
 
-Before running setup, you need a `credentials.json` file from Google. See
-[Get Google API Credentials](#get-google-api-credentials) below — this is a
+Before running the installer, you need a `credentials.json` file from Google.
+See [Get Google API Credentials](#get-google-api-credentials) below — a
 one-time, five-minute step that can't be automated (it's your own Google Cloud
 project).
 
-### Step 2 — Run the setup script
+### Step 2 — Run the installer for your OS
 
-Double-click **`scripts/setup.bat`**.
+**Windows** — double-click **`installer.ps1`** (or, if that just opens it in an
+editor: right-click → **Run with PowerShell**, or run from a terminal:
+`powershell -ExecutionPolicy Bypass -File installer.ps1`).
 
-On a completely bare machine, this single script will:
+**Linux / macOS** — from a terminal:
+```bash
+chmod +x installer.sh
+./installer.sh
+```
 
-1. Detect that Python is missing and install it automatically (via `winget`)
-2. Detect that Node.js is missing and install it automatically (via `winget`)
-3. Install the Python dependencies (`pip install -r requirements.txt`)
-4. Install PM2 and `pm2-windows-startup` (via `npm`)
-5. Ask you (interactively) what to fetch and where to save it, and write `config.json`
+Either way, on a completely bare machine, the installer will:
+
+1. Detect that Python is missing and install it automatically
+   (Windows: `winget`, falling back to a direct download from python.org;
+   Linux/macOS: the system package manager, falling back to a self-contained
+   build downloaded into `.runtime/` — no admin/sudo needed for the fallback)
+2. Do the same for Node.js
+3. Create an isolated Python environment and install dependencies from
+   `requirements.txt`
+4. Install PM2
+5. Ask you (interactively) what to fetch and where to save it, and write
+   `config.json`
 6. Open your browser for the one-time Google login and save `token.json`
-7. Start the service under PM2 and register it to auto-start on Windows boot
+7. Start the service under PM2 and register it to auto-start on boot
 
 It's safe to re-run — every step is skipped if it's already done. If Python or
-Node.js were just installed, you may need to close the window and re-run the
-script once so the new PATH is picked up.
+Node.js were just installed via `winget`, you may need to close the terminal
+and re-run the script once so the new PATH is picked up (the script will tell
+you if this happens).
 
-> **No admin rights / no winget?** `winget` ships with modern Windows 10/11.
-> If it's unavailable, the script will tell you exactly what to install
-> manually and where from — re-run it afterward to continue.
+> **Headless Linux server?** The Google login step opens a browser, which a
+> headless machine doesn't have. Run the installer up through the login step on
+> a desktop machine instead, then copy the resulting `token.json` (and
+> `config.json`) over to the server.
 
 ---
 
@@ -188,14 +231,15 @@ All behavior is controlled by `config.json` at the repo root:
 |-------|--------|---------|
 | `mode` | `"folder"` or `"drive"` | Fetch one specific Drive folder, or your entire Drive |
 | `folder_id` | Drive folder ID | Required when `mode` is `"folder"`; ignored otherwise |
-| `destination_path` | Any local path | Where files are saved, e.g. `D:/Youtube` |
+| `destination_path` | Any local path | Where files are saved, e.g. `D:/Youtube` or `/home/you/GoogleDrive` |
 | `delete_after_download` | `true` / `false` | Delete each file from Drive right after downloading it |
 | `check_interval_seconds` | Number | How often watch mode checks Drive for new files |
 
-The easiest way to create or update this file is the interactive wizard:
+The easiest way to create or update this file is the interactive wizard
+(also runnable standalone, any time):
 
 ```bash
-python src/configure.py
+python src/configure.py      # Windows: use the same "python" the installer used
 ```
 
 It asks you to choose folder-vs-whole-drive, paste a folder URL or ID (it
@@ -215,31 +259,18 @@ pm2 restart drive-auto-fetcher
 
 ---
 
-## Using PM2
+## Managing the Service
 
-Once running, you control the service using PM2 commands in any terminal:
+Once running, control it using PM2 commands in any terminal:
 
 ```bash
-# See all running PM2 processes and their status
-pm2 list
-
-# Watch live logs (Ctrl+C to exit)
-pm2 logs drive-auto-fetcher
-
-# See last 100 log lines
+pm2 list                             # see all processes and their status
+pm2 logs drive-auto-fetcher          # watch live logs (Ctrl+C to exit)
 pm2 logs drive-auto-fetcher --lines 100
-
-# Restart the service (e.g. after changing config.json)
-pm2 restart drive-auto-fetcher
-
-# Stop the service temporarily
-pm2 stop drive-auto-fetcher
-
-# Start it again after stopping
-pm2 start drive-auto-fetcher
-
-# Remove it from PM2 entirely
-pm2 delete drive-auto-fetcher
+pm2 restart drive-auto-fetcher       # after changing config.json
+pm2 stop drive-auto-fetcher          # stop temporarily
+pm2 start drive-auto-fetcher         # start it again
+pm2 delete drive-auto-fetcher        # remove it from PM2 entirely
 ```
 
 | Icon | Meaning |
@@ -248,21 +279,19 @@ pm2 delete drive-auto-fetcher
 | 🔴 stopped | Manually stopped |
 | 🟠 errored | Crashed (check logs) |
 
-`scripts/pm2_start.bat` and `scripts/pm2_stop.bat` wrap the common start/stop
-sequence, including the PM2/`pm2-windows-startup` install check.
+`scripts/start-service.{ps1,sh}` and `scripts/stop-service.{ps1,sh}` wrap the
+common start/stop sequence (including the PM2 auto-start-on-boot registration),
+for when you want that without re-running the whole installer.
 
----
+### Not using PM2
 
-## Alternative: Task Scheduler
-
-If PM2/Node.js isn't an option on a given machine, `scripts/install_task_scheduler.ps1`
-registers the fetcher as a Windows Task Scheduler job that runs in watch mode on
-every login instead (no crash auto-restart beyond Task Scheduler's own retry
-policy). Run it once, as Administrator, from an elevated PowerShell:
-
-```powershell
-scripts\install_task_scheduler.ps1
-```
+If you'd rather avoid installing Node.js/PM2 altogether:
+- **Windows**: `scripts/windows-task-scheduler-alternative.ps1` registers a
+  Task Scheduler job that runs in watch mode on login instead. Run it once,
+  from an elevated PowerShell.
+- **Linux**: `scripts/linux-systemd-alternative.sh` registers a
+  `systemd --user` service instead. Run it once (no sudo needed, though it
+  will suggest one `loginctl` command to let the service run after logout).
 
 ---
 
@@ -306,17 +335,25 @@ actually re-download anything — it just won't find them in Drive either).
 
 ### PM2 not starting after reboot
 
-Run `scripts\setup.bat` again, or manually:
+Run the installer again, or manually:
 ```bash
 pm2 save
-pm2-startup install
+pm2 startup      # follow the printed instructions (Linux/macOS)
+pm2-startup install   # Windows
 ```
 
-### `setup.ps1` says Python/Node "isn't visible in this terminal yet"
+### Installer says Python/Node "isn't visible in this terminal yet" (Windows)
 
-The installer updated your system PATH, but the *current* terminal window
-was opened before that happened. Close the window, open a new one, and
-re-run `scripts\setup.bat`.
+`winget` updated your system PATH, but the *current* terminal window was
+opened before that happened. Close the window, open a new one, and re-run
+`installer.ps1`.
+
+### `pip install` fails with "externally-managed-environment" (Linux)
+
+This is expected on modern Debian/Ubuntu — `installer.sh` avoids it entirely
+by installing dependencies into `.runtime/venv` rather than the system Python.
+If you're invoking `python3 src/drive_fetcher.py` directly instead of through
+that venv, use `.runtime/venv/bin/python3` instead of the system `python3`.
 
 ---
 
@@ -329,15 +366,21 @@ pm2 stop drive-auto-fetcher
 
 **To remove it completely:**
 
-Run `scripts\pm2_stop.bat`, then:
+Run `scripts/stop-service.{ps1,sh}`, then:
 ```bash
-pm2-startup uninstall
+pm2-startup uninstall   # Windows
+pm2 unstartup            # Linux/macOS
 ```
 
-This removes the Windows auto-start entry. PM2 itself stays installed
-but won't start anything on boot.
+This removes the boot-time auto-start entry. PM2 itself stays installed but
+won't start anything on boot.
 
-If you used the Task Scheduler alternative instead of PM2:
+If you used the Task Scheduler / systemd alternative instead of PM2:
 ```powershell
+# Windows
 Unregister-ScheduledTask -TaskName 'DriveAutoFetcher' -Confirm:$false
+```
+```bash
+# Linux
+systemctl --user disable --now drive-auto-fetcher
 ```
