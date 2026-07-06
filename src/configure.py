@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -17,6 +18,13 @@ BASE_DIR    = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config.json"
 
 FOLDER_URL_RE = re.compile(r"[-\w]{25,}")
+
+
+def default_destination():
+    """A sensible per-OS starting suggestion; the user can type anything else."""
+    if os.name == "nt":
+        return "D:/Youtube"
+    return str(Path.home() / "GoogleDrive")
 
 
 def ask(prompt, default=None):
@@ -87,8 +95,8 @@ def main():
         folder_id = extract_folder_id(raw)
         print(f"Using folder ID: {folder_id}")
 
-    print("\nWhere should downloaded files be saved on this PC?")
-    default_dest = existing.get("destination_path") if existing else "D:/Youtube"
+    print("\nWhere should downloaded files be saved on this machine?")
+    default_dest = existing.get("destination_path") if existing else default_destination()
     destination_path = ask("Destination folder", default=default_dest)
     destination_path = destination_path.replace("\\", "/")
 

@@ -3,10 +3,11 @@ Google Drive Auto-Fetcher
 =========================
 - Downloads files from a Google Drive folder (or the whole Drive) — including subfolders
 - Mirrors exact folder structure to the configured destination directory
-- Sanitizes filenames — removes characters Windows forbids (? * : " < > | / \\)
+- Sanitizes filenames for whichever OS this runs on
 - Deletes each file (and emptied folder) from Drive immediately after successful download
 - Tracks downloaded files so duplicates are never re-downloaded
 - Runs once, or continuously in watch mode
+- Works on Windows, Linux, and macOS
 
 All user-tunable settings live in config.json at the repo root (see config.example.json).
 Run `python src/configure.py` to create or update it interactively.
@@ -52,7 +53,7 @@ def load_config():
     """Load and validate config.json. Exits with a clear message if it's missing/invalid."""
     if not CONFIG_FILE.exists():
         log.error(f"config.json not found at {CONFIG_FILE}")
-        log.error("Run:  python src/configure.py   (or scripts/setup.bat for full first-time setup)")
+        log.error("Run:  python src/configure.py   (or the installer for full first-time setup)")
         sys.exit(1)
 
     try:
@@ -93,32 +94,41 @@ def load_config():
     }
 
 
-# ── Windows Filename Sanitizer ─────────────────────────────────────────────────
+# ── Filename Sanitizer ──────────────────────────────────────────────────────────
+# Google Drive filenames can contain characters that are illegal (or merely
+# awkward) as local filenames. What's illegal depends on the OS we're running on.
 
-# Characters Windows forbids in file/folder names
-_WIN_FORBIDDEN = r'[<>:"/\\|?*]'
-# Control characters ASCII 0-31
-_WIN_CONTROL   = r'[\x00-\x1f]'
-# Names Windows reserves (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+IS_WINDOWS = os.name == "nt"
+
+# Windows forbids these anywhere in a name; POSIX (Linux/macOS) only truly forbids '/'
+# (and the NUL byte, covered by the control-character strip below).
+_FORBIDDEN     = r'[<>:"/\\|?*]' if IS_WINDOWS else r'[/]'
+# Control characters ASCII 0-31 — invalid/unwise on every OS.
+_CONTROL       = r'[\x00-\x1f]'
+# Names Windows reserves (CON, PRN, AUX, NUL, COM1-9, LPT1-9) — irrelevant on POSIX.
 _WIN_RESERVED  = re.compile(
     r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', re.IGNORECASE
 )
 
 def sanitize_name(name: str) -> str:
     """
-    Make a Google Drive file/folder name safe for Windows.
+    Make a Google Drive file/folder name safe for the local filesystem.
 
-    Examples:
+    Examples on Windows:
       "What is Dot Product? Simple Guide"  ->  "What is Dot Product_ Simple Guide"
       "Video: Part 1/2"                    ->  "Video_ Part 1_2"
       "Report <2024>"                      ->  "Report _2024_"
+
+    Examples on Linux/macOS (only '/' is actually illegal):
+      "What is Dot Product? Simple Guide"  ->  "What is Dot Product? Simple Guide"
+      "Video: Part 1/2"                    ->  "Video: Part 1_2"
     """
-    safe = re.sub(_WIN_FORBIDDEN, '_', name)   # replace forbidden chars
-    safe = re.sub(_WIN_CONTROL, '', safe)       # remove control chars
-    safe = safe.strip('. ')                     # strip leading/trailing dots/spaces
-    if _WIN_RESERVED.match(safe):               # handle reserved names
+    safe = re.sub(_FORBIDDEN, '_', name)   # replace forbidden chars
+    safe = re.sub(_CONTROL, '', safe)       # remove control chars
+    safe = safe.strip('. ')                  # strip leading/trailing dots/spaces
+    if IS_WINDOWS and _WIN_RESERVED.match(safe):   # handle Windows-reserved names
         safe = safe + '_'
-    if not safe:                                # fallback if name is now empty
+    if not safe:                             # fallback if name is now empty
         safe = '_unnamed_'
     return safe
 

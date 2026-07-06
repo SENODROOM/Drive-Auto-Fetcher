@@ -12,3 +12,4 @@ pm2_err.log
 pm2_out.log
 __pycache__/
 *.pyc
+.claude/
