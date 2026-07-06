@@ -5,7 +5,6 @@ CLAUDE.md
 drive-auto-fetcher.txt
 credentials.json
 token.json
-config.json
 downloaded_files.json
 drive_fetcher.log
 pm2_err.log
