@@ -1,10 +1,10 @@
 // ============================================================
 //  PM2 Ecosystem Config — Drive Auto-Fetcher
 //
-//  This file tells PM2 how to run drive_fetcher.py:
-//  - Runs in watch mode (checks Drive every 60 seconds)
+//  This file tells PM2 how to run src/drive_fetcher.py:
+//  - Runs in watch mode (interval configured in config.json)
 //  - Auto-restarts if the script crashes
-//  - Saves logs to drive_fetcher.log
+//  - Saves logs to drive_fetcher.log / pm2_out.log / pm2_err.log
 //  - Starts automatically when Windows boots
 // ============================================================
 
@@ -17,10 +17,10 @@ module.exports = {
       // Use Python to run the script
       interpreter: "python",
 
-      // Path to your script (relative to this file)
-      script: "drive_fetcher.py",
+      // Path to your script (relative to this file, i.e. the repo root)
+      script: "src/drive_fetcher.py",
 
-      // Run in watch mode — checks Drive every 60 seconds
+      // Run in watch mode — checks Drive on the interval set in config.json
       args: "--watch",
 
       // Working directory (same folder as this file)

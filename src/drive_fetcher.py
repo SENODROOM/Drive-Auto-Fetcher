@@ -1,12 +1,15 @@
 """
-Google Drive Auto-Fetcher v4
-=============================
-- Downloads ALL files from Google Drive folder (including subfolders)
-- Mirrors exact folder structure to D:/Youtube
-- Sanitizes filenames — removes characters Windows forbids (? * : " < > | / \)
-- Deletes each file from Drive immediately after successful download
+Google Drive Auto-Fetcher
+=========================
+- Downloads files from a Google Drive folder (or the whole Drive) — including subfolders
+- Mirrors exact folder structure to the configured destination directory
+- Sanitizes filenames — removes characters Windows forbids (? * : " < > | / \\)
+- Deletes each file (and emptied folder) from Drive immediately after successful download
 - Tracks downloaded files so duplicates are never re-downloaded
-- Runs on every Windows login OR continuously in watch mode
+- Runs once, or continuously in watch mode
+
+All user-tunable settings live in config.json at the repo root (see config.example.json).
+Run `python src/configure.py` to create or update it interactively.
 """
 
 import os
@@ -18,16 +21,17 @@ import logging
 import time
 from pathlib import Path
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────────
-FOLDER_ID             = "1iPZHhDGWwe3outDkz467pkgTkSCYN2Kw"
-SAVE_DIR              = "D:/Youtube"
-CREDENTIALS_FILE      = "credentials.json"
-TOKEN_FILE            = "token.json"
-TRACKING_FILE         = "downloaded_files.json"
-LOG_FILE              = "drive_fetcher.log"
-DELETE_AFTER_DOWNLOAD = True
-CHECK_INTERVAL        = 60
-# ───────────────────────────────────────────────────────────────────────────────
+# ─── PATHS ──────────────────────────────────────────────────────────────────────
+# Resolved relative to the repo root (parent of this file's directory), not the
+# process's current working directory, so the script behaves the same whether
+# it's launched via PM2, Task Scheduler, or double-clicked from anywhere.
+BASE_DIR         = Path(__file__).resolve().parent.parent
+CONFIG_FILE      = BASE_DIR / "config.json"
+CONFIG_EXAMPLE   = BASE_DIR / "config.example.json"
+CREDENTIALS_FILE = BASE_DIR / "credentials.json"
+TOKEN_FILE       = BASE_DIR / "token.json"
+TRACKING_FILE    = BASE_DIR / "downloaded_files.json"
+LOG_FILE         = BASE_DIR / "drive_fetcher.log"
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -40,6 +44,53 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+
+
+# ── Config ──────────────────────────────────────────────────────────────────────
+
+def load_config():
+    """Load and validate config.json. Exits with a clear message if it's missing/invalid."""
+    if not CONFIG_FILE.exists():
+        log.error(f"config.json not found at {CONFIG_FILE}")
+        log.error("Run:  python src/configure.py   (or scripts/setup.bat for full first-time setup)")
+        sys.exit(1)
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except json.JSONDecodeError as e:
+        log.error(f"config.json is not valid JSON: {e}")
+        sys.exit(1)
+
+    mode = cfg.get("mode", "folder")
+    if mode not in ("folder", "drive"):
+        log.error(f"config.json: 'mode' must be 'folder' or 'drive', got {mode!r}")
+        sys.exit(1)
+
+    if mode == "drive":
+        folder_id = "root"
+        folder_label = "My Drive (entire account)"
+    else:
+        folder_id = str(cfg.get("folder_id", "")).strip()
+        if not folder_id:
+            log.error("config.json: 'folder_id' is empty but mode is 'folder'.")
+            log.error("Run: python src/configure.py")
+            sys.exit(1)
+        folder_label = folder_id
+
+    destination_path = str(cfg.get("destination_path", "")).strip()
+    if not destination_path:
+        log.error("config.json: 'destination_path' is empty. Run: python src/configure.py")
+        sys.exit(1)
+
+    return {
+        "mode": mode,
+        "folder_id": folder_id,
+        "folder_label": folder_label,
+        "destination_path": destination_path,
+        "delete_after_download": bool(cfg.get("delete_after_download", True)),
+        "check_interval_seconds": int(cfg.get("check_interval_seconds", 60)),
+    }
 
 
 # ── Windows Filename Sanitizer ─────────────────────────────────────────────────
@@ -75,7 +126,7 @@ def sanitize_name(name: str) -> str:
 # ── Tracking ───────────────────────────────────────────────────────────────────
 
 def load_downloaded():
-    if os.path.exists(TRACKING_FILE):
+    if TRACKING_FILE.exists():
         try:
             with open(TRACKING_FILE, "r") as f:
                 return set(json.load(f))
@@ -103,8 +154,8 @@ def get_drive_service():
 
     creds = None
 
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -117,10 +168,10 @@ def get_drive_service():
                 creds = None
 
         if not creds:
-            if not os.path.exists(CREDENTIALS_FILE):
-                log.error("credentials.json not found! See README.md Step 2.")
+            if not CREDENTIALS_FILE.exists():
+                log.error(f"credentials.json not found at {CREDENTIALS_FILE}! See README.md.")
                 sys.exit(1)
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
             creds = flow.run_local_server(port=0, open_browser=True)
             log.info("Authentication successful.")
 
@@ -189,8 +240,9 @@ def debug_folder(service, folder_id):
         log.info("    2. Files are owned by a different Google account")
         log.info("    3. You don't have permission to view this folder")
         log.info("    4. The folder ID is wrong")
-        log.info(f"  Try opening this URL to verify:")
-        log.info(f"  https://drive.google.com/drive/folders/{folder_id}")
+        if folder_id != "root":
+            log.info(f"  Try opening this URL to verify:")
+            log.info(f"  https://drive.google.com/drive/folders/{folder_id}")
     else:
         log.info(f"  Total items found: {total}")
     log.info("=" * 60)
@@ -226,11 +278,11 @@ def delete_item(service, item_id, name):
 
 # ── Recursive Download ─────────────────────────────────────────────────────────
 
-def process_folder(service, folder_id, folder_name, local_path, downloaded_ids):
+def process_folder(service, folder_id, folder_name, local_path, downloaded_ids, delete_after_download):
     """
     Recursively download all files in a Drive folder to local_path.
     Mirrors the exact folder structure.
-    Deletes each file from Drive immediately after download.
+    Deletes each file from Drive immediately after download (if enabled).
     """
     log.info(f"📂 Folder: {folder_name}  →  {local_path}")
     os.makedirs(local_path, exist_ok=True)
@@ -273,7 +325,7 @@ def process_folder(service, folder_id, folder_name, local_path, downloaded_ids):
             downloaded_ids.add(fid)
             save_downloaded(downloaded_ids)
 
-            if DELETE_AFTER_DOWNLOAD:
+            if delete_after_download:
                 delete_item(service, fid, fname)
 
         except Exception as e:
@@ -287,61 +339,83 @@ def process_folder(service, folder_id, folder_name, local_path, downloaded_ids):
         if safe_sub != sub_name:
             log.info(f"  ✏  Folder name sanitized: '{sub_name}'  →  '{safe_sub}'")
         sub_local = os.path.join(local_path, safe_sub)
-        process_folder(service, sub_id, sub_name, sub_local, downloaded_ids)
+        process_folder(service, sub_id, sub_name, sub_local, downloaded_ids, delete_after_download)
 
-        if DELETE_AFTER_DOWNLOAD:
+        if delete_after_download:
             delete_item(service, sub_id, sub_name)
 
 
 # ── Entry Points ───────────────────────────────────────────────────────────────
 
-def check_and_download(service, downloaded_ids):
-    process_folder(service, FOLDER_ID, "ROOT", SAVE_DIR, downloaded_ids)
+def check_and_download(service, downloaded_ids, config):
+    process_folder(
+        service,
+        config["folder_id"],
+        config["folder_label"],
+        config["destination_path"],
+        downloaded_ids,
+        config["delete_after_download"],
+    )
     return downloaded_ids
 
 
 def run_once():
+    config = load_config()
+
     log.info("=" * 60)
-    log.info("Drive Auto-Fetcher v3")
-    log.info(f"Folder ID : {FOLDER_ID}")
-    log.info(f"Save to   : {SAVE_DIR}")
+    log.info("Drive Auto-Fetcher")
+    log.info(f"Source    : {config['folder_label']}")
+    log.info(f"Save to   : {config['destination_path']}")
+    log.info(f"Delete after download : {config['delete_after_download']}")
     log.info("=" * 60)
 
     service    = get_drive_service()
     downloaded = load_downloaded()
 
     # Always run debug first so you can see what the API returns
-    debug_folder(service, FOLDER_ID)
+    debug_folder(service, config["folder_id"])
 
-    check_and_download(service, downloaded)
+    check_and_download(service, downloaded, config)
     log.info("Done.")
     log.info("=" * 60)
 
 
 def run_watch():
+    config = load_config()
+
     log.info("=" * 60)
-    log.info(f"Drive Auto-Fetcher v3 — watch mode (every {CHECK_INTERVAL}s)")
-    log.info(f"Folder ID : {FOLDER_ID}")
-    log.info(f"Save to   : {SAVE_DIR}")
+    log.info(f"Drive Auto-Fetcher — watch mode (every {config['check_interval_seconds']}s)")
+    log.info(f"Source    : {config['folder_label']}")
+    log.info(f"Save to   : {config['destination_path']}")
+    log.info(f"Delete after download : {config['delete_after_download']}")
     log.info("=" * 60)
 
     service    = get_drive_service()
     downloaded = load_downloaded()
 
     # Debug once at start
-    debug_folder(service, FOLDER_ID)
+    debug_folder(service, config["folder_id"])
 
     while True:
         try:
-            downloaded = check_and_download(service, downloaded)
+            downloaded = check_and_download(service, downloaded, config)
         except Exception as e:
             log.error(f"Error during check: {e}")
-        log.info(f"Sleeping {CHECK_INTERVAL}s…")
-        time.sleep(CHECK_INTERVAL)
+        log.info(f"Sleeping {config['check_interval_seconds']}s…")
+        time.sleep(config["check_interval_seconds"])
+
+
+def run_auth_only():
+    """Perform the OAuth login (and save token.json) without downloading anything."""
+    log.info("Running authentication only (no download)...")
+    get_drive_service()
+    log.info(f"Authentication successful. Token saved to {TOKEN_FILE}")
 
 
 if __name__ == "__main__":
-    if "--watch" in sys.argv:
+    if "--auth-only" in sys.argv:
+        run_auth_only()
+    elif "--watch" in sys.argv:
         run_watch()
     else:
         run_once()

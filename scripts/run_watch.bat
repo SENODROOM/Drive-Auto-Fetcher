@@ -1,10 +1,10 @@
 @echo off
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 echo ============================================
-echo  Drive Auto-Fetcher v3 - Watch Mode
-echo  Checks every 60 seconds for new files.
+echo  Drive Auto-Fetcher - Watch Mode
+echo  Checks periodically for new files (see config.json).
 echo  Close this window to stop.
 echo ============================================
 echo.
-python drive_fetcher.py --watch
+python src\drive_fetcher.py --watch
 pause

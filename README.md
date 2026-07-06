@@ -1,43 +1,52 @@
 # 📁 Drive Auto-Fetcher
 
-A background service that watches your Google Drive folder, downloads every file
-to `D:\Youtube` with the **exact same folder structure**, and **deletes each file
-from Drive** the moment it finishes downloading. New files are detected every
-60 seconds. Already-downloaded files are never re-downloaded.
+A background service that watches a Google Drive folder — or your entire Drive —
+downloads every file to a folder on your PC with the **exact same folder structure**,
+and **deletes each file from Drive** the moment it finishes downloading. New files
+are detected on a configurable interval. Already-downloaded files are never
+re-downloaded.
 
 Managed by **PM2** — a professional process manager that keeps the script running
 24/7 and automatically restarts it on crashes or Windows reboots.
+
+One script (`scripts/setup.bat`) takes a completely bare Windows machine —
+no Python, no Node.js, nothing pre-installed — all the way to a fully running
+background service.
 
 ---
 
 ## 📋 Table of Contents
 
 1. [How It Works](#how-it-works)
-2. [What's in This Folder](#whats-in-this-folder)
-3. [Prerequisites](#prerequisites)
-4. [Setup Guide](#setup-guide)
-5. [Using PM2](#using-pm2)
-6. [File Structure on Your PC](#file-structure-on-your-pc)
-7. [Configuration](#configuration)
+2. [Project Layout](#project-layout)
+3. [Quick Start](#quick-start)
+4. [Get Google API Credentials](#get-google-api-credentials)
+5. [Configuration](#configuration)
+6. [Using PM2](#using-pm2)
+7. [Alternative: Task Scheduler](#alternative-task-scheduler)
 8. [Troubleshooting](#troubleshooting)
-9. [How to Uninstall](#how-to-uninstall)
+9. [Uninstalling](#uninstalling)
 
 ---
 
 ## How It Works
 
 ```
-Every 60 seconds:
+Every N seconds (configurable):
   ┌─────────────────────────────────────────────────────────┐
-  │  1. Script asks Google Drive API: "what's in the folder?"│
+  │  1. Script asks Google Drive API: "what's in scope?"     │
   │  2. Compares result with downloaded_files.json           │
   │  3. For each NEW file found:                             │
-  │       a. Download it to D:\Youtube (same folder path)   │
+  │       a. Download it to your destination folder          │
+  │          (same folder path as in Drive)                  │
   │       b. Mark it as downloaded in downloaded_files.json  │
   │       c. Delete it from Google Drive                     │
-  │  4. Sleep 60 seconds → repeat                            │
+  │  4. Sleep → repeat                                        │
   └─────────────────────────────────────────────────────────┘
 ```
+
+"Scope" is whatever you chose during setup: a single Drive folder (with all its
+subfolders), or your entire Drive.
 
 **PM2** sits on top of this and:
 - Keeps the script running in the background (no window open)
@@ -51,104 +60,84 @@ the script authenticates silently forever (PM2 never needs a browser).
 
 ---
 
-## What's in This Folder
+## Project Layout
 
 ```
 drive-auto-fetcher/
 │
-├── drive_fetcher.py          ← The main Python script
-│                               All the logic lives here:
-│                               authentication, folder scanning,
-│                               downloading, deleting, tracking
+├── src/
+│   ├── drive_fetcher.py       All the runtime logic: authentication, folder
+│   │                          scanning, downloading, deleting, tracking
+│   └── configure.py           Interactive wizard that writes config.json
 │
-├── ecosystem.config.js       ← PM2 configuration
-│                               Tells PM2: which script to run,
-│                               what arguments, log file names,
-│                               restart policy, etc.
+├── scripts/
+│   ├── setup.bat / setup.ps1  Run ONCE — installs everything and starts the service
+│   ├── run_once.bat           Manually run a single check-and-download pass
+│   ├── run_watch.bat          Manually run continuously in a foreground window
+│   ├── pm2_start.bat          (Re)start the PM2-managed background service
+│   ├── pm2_stop.bat           Stop and remove the PM2-managed service
+│   └── install_task_scheduler.ps1
+│                              Alternative to PM2, using Windows Task Scheduler
 │
-├── requirements.txt          ← Python library dependencies
-│                               (Google API client libraries)
+├── ecosystem.config.js        PM2 configuration (process name, restart policy, logs)
+├── requirements.txt           Python dependencies (Google API client libraries)
+├── config.example.json        Template — copy/wizard-generate this into config.json
 │
-├── 1_first_time_setup.bat    ← Run ONCE before anything else
-│                               Installs Python deps + opens
-│                               browser for Google login
-│
-├── 2_start_pm2.bat           ← Start the background service
-│                               Installs PM2 if needed,
-│                               registers Windows auto-start
-│
-├── 3_stop_pm2.bat            ← Stop the background service
-│
-├── credentials.json          ← YOU create this (Step 3 below)
-│                               Google OAuth2 app credentials
-│                               downloaded from Google Cloud
-│
-├── token.json                ← AUTO-CREATED after first login
-│                               Your Google session token
-│                               DO NOT delete this or share it
-│
-├── downloaded_files.json     ← AUTO-CREATED at runtime
-│                               List of Drive file IDs already
-│                               downloaded. Prevents re-downloads
-│
-├── drive_fetcher.log         ← AUTO-CREATED at runtime
-│                               Full log of every action taken
-│
-├── pm2_out.log               ← AUTO-CREATED by PM2
-│                               stdout from the script
-│
-└── pm2_err.log               ← AUTO-CREATED by PM2
-                                stderr / crash output
+├── config.json                 YOU create this (via the setup wizard) — your settings
+├── credentials.json            YOU create this — Google OAuth2 app credentials
+├── token.json                  AUTO-CREATED after first login — your Google session
+├── downloaded_files.json       AUTO-CREATED at runtime — dedup tracking
+├── drive_fetcher.log           AUTO-CREATED at runtime — full action log
+├── pm2_out.log / pm2_err.log   AUTO-CREATED by PM2 — stdout / stderr
 ```
+
+`config.json`, `credentials.json`, `token.json`, and all the auto-created files
+are gitignored — they're machine-specific and never committed.
 
 ---
 
-## Prerequisites
+## Quick Start
 
-You need three things installed before setup:
+You need three things, none of which you have to install by hand:
 
-| Tool | Purpose | Download |
-|------|---------|----------|
-| **Python 3.10+** | Runs the script | https://www.python.org/downloads/ |
-| **Node.js 18+** | Required by PM2 | https://nodejs.org/ |
-| **PM2** | Process manager | Installed automatically by `2_start_pm2.bat` |
+| Tool | Purpose |
+|------|---------|
+| **Python 3.10+** | Runs the script |
+| **Node.js LTS** | Required by PM2 |
+| **PM2** | Process manager |
 
-> ⚠️ When installing Python, check **"Add Python to PATH"**.
-> When installing Node.js, it adds itself to PATH automatically.
+### Step 1 — Get Google API credentials
 
----
+Before running setup, you need a `credentials.json` file from Google. See
+[Get Google API Credentials](#get-google-api-credentials) below — this is a
+one-time, five-minute step that can't be automated (it's your own Google Cloud
+project).
 
-## Setup Guide
+### Step 2 — Run the setup script
 
-Follow these steps **in order**. Do each one only once.
+Double-click **`scripts/setup.bat`**.
 
----
+On a completely bare machine, this single script will:
 
-### Step 1 — Install Python and Node.js
+1. Detect that Python is missing and install it automatically (via `winget`)
+2. Detect that Node.js is missing and install it automatically (via `winget`)
+3. Install the Python dependencies (`pip install -r requirements.txt`)
+4. Install PM2 and `pm2-windows-startup` (via `npm`)
+5. Ask you (interactively) what to fetch and where to save it, and write `config.json`
+6. Open your browser for the one-time Google login and save `token.json`
+7. Start the service under PM2 and register it to auto-start on Windows boot
 
-- Python: https://www.python.org/downloads/ → ✅ check "Add Python to PATH"
-- Node.js: https://nodejs.org/ → download the LTS version
+It's safe to re-run — every step is skipped if it's already done. If Python or
+Node.js were just installed, you may need to close the window and re-run the
+script once so the new PATH is picked up.
 
-Verify in a terminal (`Win + R` → type `cmd` → Enter):
-```
-python --version
-node --version
-```
-Both should print a version number.
-
----
-
-### Step 2 — Create `D:\Youtube` folder
-
-Make sure the folder exists where files will be saved:
-```
-D:\Youtube\
-```
-Create it manually in File Explorer if it doesn't exist.
+> **No admin rights / no winget?** `winget` ships with modern Windows 10/11.
+> If it's unavailable, the script will tell you exactly what to install
+> manually and where from — re-run it afterward to continue.
 
 ---
 
-### Step 3 — Get Google API Credentials
+## Get Google API Credentials
 
 This gives the script permission to access your Google Drive.
 
@@ -166,7 +155,7 @@ This gives the script permission to access your Google Drive.
    - User support email: your Gmail
    - Scroll down → **Save and Continue** through all steps
    - On the **"Test users"** page → **+ Add Users**
-   - Add your Gmail address (e.g. `quantumlogicslimited@gmail.com`)
+   - Add your Gmail address
    - **Save and Continue**
 
 5. Left sidebar: **APIs & Services → Credentials**
@@ -177,38 +166,52 @@ This gives the script permission to access your Google Drive.
 
 6. Rename the downloaded file to exactly: **`credentials.json`**
 
-7. Place `credentials.json` in **this folder** (same place as `drive_fetcher.py`)
+7. Place `credentials.json` in the **repo root** (same place as `README.md`)
 
 ---
 
-### Step 4 — First Time Setup (One-Time Google Login)
+## Configuration
 
-Double-click: **`1_first_time_setup.bat`**
+All behavior is controlled by `config.json` at the repo root:
 
-This will:
-- Install Python dependencies (`google-api-python-client` etc.)
-- Open your browser for Google login
-- You log in → click **Allow**
-- Script saves `token.json` and exits
+```json
+{
+  "mode": "folder",
+  "folder_id": "1iPZHhDGWwe3outDkz467pkgTkSCYN2Kw",
+  "destination_path": "D:/Youtube",
+  "delete_after_download": true,
+  "check_interval_seconds": 60
+}
+```
 
-> ✅ After this step, `token.json` exists in the folder.
-> PM2 will use this silently — the browser never opens again.
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `mode` | `"folder"` or `"drive"` | Fetch one specific Drive folder, or your entire Drive |
+| `folder_id` | Drive folder ID | Required when `mode` is `"folder"`; ignored otherwise |
+| `destination_path` | Any local path | Where files are saved, e.g. `D:/Youtube` |
+| `delete_after_download` | `true` / `false` | Delete each file from Drive right after downloading it |
+| `check_interval_seconds` | Number | How often watch mode checks Drive for new files |
 
----
+The easiest way to create or update this file is the interactive wizard:
 
-### Step 5 — Start with PM2
+```bash
+python src/configure.py
+```
 
-Double-click: **`2_start_pm2.bat`**
+It asks you to choose folder-vs-whole-drive, paste a folder URL or ID (it
+extracts the ID automatically), pick a destination, and set the rest.
 
-This will:
-- Install PM2 globally via npm (if not already installed)
-- Install `pm2-windows-startup` for auto-boot support
-- Start the script as a background process
-- Save the PM2 process list
-- Register PM2 to start automatically when Windows boots
+**Finding a folder ID manually:** open the folder in Google Drive — the URL looks like:
+```
+https://drive.google.com/drive/folders/1iPZHhDGWwe3outDkz467pkgTkSCYN2Kw
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                        Copy only THIS part — no ?usp=... at the end
+```
 
-> ✅ After this, the fetcher runs in the background forever —
-> even after you close all windows, even after reboots.
+After changing `config.json`, restart the service:
+```bash
+pm2 restart drive-auto-fetcher
+```
 
 ---
 
@@ -226,7 +229,7 @@ pm2 logs drive-auto-fetcher
 # See last 100 log lines
 pm2 logs drive-auto-fetcher --lines 100
 
-# Restart the service (e.g. after changing drive_fetcher.py)
+# Restart the service (e.g. after changing config.json)
 pm2 restart drive-auto-fetcher
 
 # Stop the service temporarily
@@ -239,83 +242,43 @@ pm2 start drive-auto-fetcher
 pm2 delete drive-auto-fetcher
 ```
 
-**PM2 status icons:**
 | Icon | Meaning |
 |------|---------|
 | 🟢 online | Running normally |
 | 🔴 stopped | Manually stopped |
 | 🟠 errored | Crashed (check logs) |
 
----
-
-## File Structure on Your PC
-
-The script mirrors the **exact same folder structure** from Drive to your PC.
-
-**If your Google Drive folder looks like:**
-```
-📁 Google Drive Folder/
-├── 📄 intro.mp4
-├── 📄 tutorial.mp4
-└── 📁 Lectures/
-    ├── 📄 lecture_01.mp4
-    └── 📄 lecture_02.mp4
-```
-
-**Your `D:\Youtube` will look like:**
-```
-D:\Youtube\
-├── intro.mp4
-├── tutorial.mp4
-└── Lectures\
-    ├── lecture_01.mp4
-    └── lecture_02.mp4
-```
-
-After downloading, each file is deleted from Drive. Once a subfolder is
-emptied, the subfolder itself is also deleted from Drive.
+`scripts/pm2_start.bat` and `scripts/pm2_stop.bat` wrap the common start/stop
+sequence, including the PM2/`pm2-windows-startup` install check.
 
 ---
 
-## Configuration
+## Alternative: Task Scheduler
 
-Open `drive_fetcher.py` and edit the **CONFIG** block at the top:
+If PM2/Node.js isn't an option on a given machine, `scripts/install_task_scheduler.ps1`
+registers the fetcher as a Windows Task Scheduler job that runs in watch mode on
+every login instead (no crash auto-restart beyond Task Scheduler's own retry
+policy). Run it once, as Administrator, from an elevated PowerShell:
 
-```python
-FOLDER_ID             = "1iPZHhDGWwe3outDkz467pkgTkSCYN2Kw"  # Drive folder ID
-SAVE_DIR              = "D:/Youtube"                           # Save location on PC
-DELETE_AFTER_DOWNLOAD = True    # Set False to keep files in Drive
-CHECK_INTERVAL        = 60      # Seconds between checks (in watch mode)
-```
-
-**Finding your Folder ID:**
-Open the folder in Google Drive. The URL looks like:
-```
-https://drive.google.com/drive/folders/1iPZHhDGWwe3outDkz467pkgTkSCYN2Kw
-                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                                        Copy only THIS part — no ?usp=... at the end
-```
-
-After changing the config, restart the service:
-```bash
-pm2 restart drive-auto-fetcher
+```powershell
+scripts\install_task_scheduler.ps1
 ```
 
 ---
 
 ## Troubleshooting
 
-### "No files found in the folder"
+### "No files found" / "ZERO items returned by API"
 
 Run `pm2 logs drive-auto-fetcher` and look for the DEBUG section.
 It lists everything the API can see. Common causes:
 
 | Cause | Fix |
 |-------|-----|
-| FOLDER_ID has `?usp=drive_link` at the end | Remove everything after the ID |
+| `folder_id` has `?usp=drive_link` at the end | Remove everything after the ID in `config.json` |
 | Files owned by a different Google account | Log in with the account that owns the folder |
-| Gmail not added as Test User | Go to Google Cloud → OAuth consent screen → Test users → add your Gmail |
-| Token is for wrong account | Delete `token.json`, run `1_first_time_setup.bat` again |
+| Gmail not added as Test User | Google Cloud → OAuth consent screen → Test users → add your Gmail |
+| Token is for the wrong account | Delete `token.json`, run `python src/drive_fetcher.py --auth-only` |
 
 ### "Access blocked: has not completed Google verification"
 
@@ -323,7 +286,7 @@ Your Gmail isn't added as a Test User.
 1. Go to https://console.cloud.google.com/
 2. **APIs & Services → OAuth consent screen → Test users**
 3. Add your Gmail → Save
-4. Delete `token.json` and run `1_first_time_setup.bat` again
+4. Delete `token.json` and run `python src/drive_fetcher.py --auth-only` again
 
 ### Script keeps restarting / crashing
 
@@ -331,7 +294,8 @@ Your Gmail isn't added as a Test User.
 pm2 logs drive-auto-fetcher --lines 50
 ```
 Look at the error lines. Common cause: `token.json` expired.
-Fix: delete `token.json`, run `1_first_time_setup.bat`, then `pm2 restart drive-auto-fetcher`.
+Fix: delete `token.json`, run `python src/drive_fetcher.py --auth-only`, then
+`pm2 restart drive-auto-fetcher`.
 
 ### Files downloading again after restart
 
@@ -342,15 +306,21 @@ actually re-download anything — it just won't find them in Drive either).
 
 ### PM2 not starting after reboot
 
-Run `2_start_pm2.bat` again. Then:
+Run `scripts\setup.bat` again, or manually:
 ```bash
 pm2 save
 pm2-startup install
 ```
 
+### `setup.ps1` says Python/Node "isn't visible in this terminal yet"
+
+The installer updated your system PATH, but the *current* terminal window
+was opened before that happened. Close the window, open a new one, and
+re-run `scripts\setup.bat`.
+
 ---
 
-## How to Uninstall
+## Uninstalling
 
 **To stop the service temporarily:**
 ```bash
@@ -359,10 +329,15 @@ pm2 stop drive-auto-fetcher
 
 **To remove it completely:**
 
-Double-click `3_stop_pm2.bat`, then run:
+Run `scripts\pm2_stop.bat`, then:
 ```bash
 pm2-startup uninstall
 ```
 
 This removes the Windows auto-start entry. PM2 itself stays installed
 but won't start anything on boot.
+
+If you used the Task Scheduler alternative instead of PM2:
+```powershell
+Unregister-ScheduledTask -TaskName 'DriveAutoFetcher' -Confirm:$false
+```

@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 echo ============================================================
 echo   Drive Auto-Fetcher — Starting with PM2
@@ -21,11 +21,20 @@ if %errorlevel% neq 0 (
     )
 )
 
+REM Check config.json exists
+if not exist "config.json" (
+    echo.
+    echo ERROR: config.json not found!
+    echo Run scripts\setup.bat first ^(or: python src\configure.py^).
+    pause
+    exit /b 1
+)
+
 REM Check token.json exists
 if not exist "token.json" (
     echo.
     echo ERROR: token.json not found!
-    echo Run 1_first_time_setup.bat first to log in to Google.
+    echo Run scripts\setup.bat first to log in to Google.
     pause
     exit /b 1
 )
@@ -43,7 +52,7 @@ pm2-startup install
 
 echo.
 echo ============================================================
-echo   ✅ Done! Drive Auto-Fetcher is now running in background.
+echo   Done! Drive Auto-Fetcher is now running in background.
 echo.
 echo   Useful commands:
 echo     pm2 list                    — see if it's running

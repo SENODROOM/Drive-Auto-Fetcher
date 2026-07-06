@@ -1,11 +1,14 @@
-
+CLAUDE.md
 # make-folder-txt
 .txtconfig
 .txtignore
 drive-auto-fetcher.txt
 credentials.json
 token.json
+config.json
 downloaded_files.json
 drive_fetcher.log
 pm2_err.log
 pm2_out.log
+__pycache__/
+*.pyc
